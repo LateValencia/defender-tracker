@@ -2,11 +2,26 @@ import { useState, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import { loadAll, saveVehicle, addRow, updateRow, deleteRow } from './db.js'
 
+// ── Helpers ──────────────────────────────────────────────────
+
 function fmt(n, dec = 0) {
   if (n == null || isNaN(parseFloat(n))) return '—'
   return parseFloat(n).toLocaleString('fr-FR', { minimumFractionDigits: dec, maximumFractionDigits: dec })
 }
 function todayStr() { return new Date().toISOString().split('T')[0] }
+
+function sortByDate(arr) {
+  return [...arr].sort((a, b) => new Date(b.date) - new Date(a.date))
+}
+
+function computeCurrentKm(data) {
+  const kms = [
+    ...data.maintenance.map(m => parseFloat(m.km) || 0),
+    ...(data.trips || []).map(t => parseFloat(t.endKm) || 0),
+    ...data.fuel.map(f => parseFloat(f.km) || 0),
+  ].filter(k => k > 0)
+  return kms.length > 0 ? Math.max(...kms) : (parseFloat(data.vehicle.km) || 0)
+}
 
 function computeAvgConso(fuel) {
   const fulls = [...fuel]
@@ -66,26 +81,22 @@ const CSS = `
   .df-hdr {
     border-bottom: 1px solid var(--border);
     padding-top: calc(14px + env(safe-area-inset-top));
-    padding-left: 16px;
-    padding-right: 16px;
-    padding-bottom: 0;
+    padding-left: 16px; padding-right: 16px; padding-bottom: 0;
     background: var(--surface);
-    position: sticky;
-    top: 0;
-    z-index: 10;
+    position: sticky; top: 0; z-index: 10;
   }
-  .df-hdr-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .df-hdr-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
   .df-vname { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:22px; letter-spacing:2px; text-transform:uppercase; line-height:1; }
   .df-vsub { font-size:11px; color:var(--text-3); letter-spacing:1px; margin-top:3px; }
   .df-vsub button { background:none; border:none; color:var(--accent); cursor:pointer; font-size:11px; text-decoration:underline; padding:0; }
-  .df-km { text-align:right; cursor:pointer; }
+  .df-km { text-align:right; }
   .df-km-n { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:28px; line-height:1; }
-  .df-km:hover .df-km-n { color:var(--accent); }
   .df-km-l { font-size:10px; color:var(--text-3); letter-spacing:1.5px; text-transform:uppercase; }
   .df-tabs { display:flex; overflow-x:auto; scrollbar-width:none; }
   .df-tabs::-webkit-scrollbar { display:none; }
-  .df-tab { flex-shrink:0; padding:10px 13px; background:none; border:none; border-bottom:2px solid transparent; color:var(--text-3); cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:13px; letter-spacing:1px; text-transform:uppercase; }
+  .df-tab { flex-shrink:0; padding:10px 13px; background:none; border:none; border-bottom:2px solid transparent; color:var(--text-3); cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:13px; letter-spacing:1px; text-transform:uppercase; position:relative; }
   .df-tab.on { color:var(--accent); border-bottom-color:var(--accent); }
+  .df-badge { position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%; background:var(--danger); }
   .df-body { padding:14px 16px 32px; }
   .df-kpis { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-bottom:14px; }
   .df-kpi { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:11px 13px; }
@@ -96,9 +107,8 @@ const CSS = `
   .df-st { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:13px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-2); }
   .df-btn { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:8px 14px; cursor:pointer; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:12px; letter-spacing:1px; text-transform:uppercase; color:var(--text); }
   .df-btn.p { background:var(--success-bg); border-color:var(--accent-dim); color:var(--accent); }
-  .df-del { background:none; border:none; color:var(--text-3); cursor:pointer; font-size:16px; padding:4px 8px; border-radius:4px; line-height:1; }
+  .df-del { background:none; border:none; color:var(--text-3); cursor:pointer; font-size:18px; padding:4px 8px; border-radius:4px; line-height:1; flex-shrink:0; }
   .df-del:hover { color:var(--danger); background:var(--danger-bg); }
-  .df-edit { background:none; border:none; cursor:pointer; font-size:15px; padding:4px 8px; border-radius:4px; line-height:1; }
   .df-b { display:inline-block; padding:2px 7px; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:1px; text-transform:uppercase; border-radius:var(--radius); }
   .df-bg { background:var(--success-bg); color:var(--accent); }
   .df-ba { background:var(--warning-bg); color:var(--amber); }
@@ -111,16 +121,20 @@ const CSS = `
   .df-stat { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:9px 8px; text-align:center; }
   .df-sv { font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:18px; color:var(--accent); }
   .df-sl { font-size:9px; color:var(--text-3); letter-spacing:1px; text-transform:uppercase; margin-top:2px; }
-  .df-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:12px 14px; margin-bottom:8px; }
+  .df-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg);
+    padding:12px 14px; margin-bottom:8px;
+    cursor:pointer; transition:border-color .15s;
+  }
+  .df-card:hover { border-color:var(--accent-dim); }
   .df-card-title { font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--text-3); margin-bottom:8px; }
   .df-empty { border:1px dashed var(--border); border-radius:var(--radius); padding:28px; text-align:center; color:var(--text-3); font-size:12px; }
   .df-form-hdr {
     display:flex; align-items:center; gap:12px;
-    padding-top: calc(12px + env(safe-area-inset-top));
-    padding-left: 16px; padding-right: 16px; padding-bottom: 12px;
+    padding-top:calc(12px + env(safe-area-inset-top));
+    padding-left:16px; padding-right:16px; padding-bottom:12px;
     border-bottom:1px solid var(--border);
-    background:var(--surface);
-    position:sticky; top:0; z-index:10;
+    background:var(--surface); position:sticky; top:0; z-index:10;
   }
   .df-form-back { background:none; border:none; color:var(--text-2); cursor:pointer; font-size:22px; padding:2px 6px; border-radius:4px; line-height:1; }
   .df-form-title { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:17px; letter-spacing:2px; text-transform:uppercase; }
@@ -136,7 +150,6 @@ const CSS = `
   .df-mu { color:var(--text-3); font-size:10px; }
   .df-loader { display:flex; align-items:center; justify-content:center; min-height:200px; color:var(--text-3); font-family:'Barlow Condensed',sans-serif; letter-spacing:2px; text-transform:uppercase; font-size:13px; }
   .df-err { padding:20px; background:var(--danger-bg); border:1px solid var(--danger); border-radius:var(--radius); color:var(--danger); font-size:12px; margin:16px; }
-  .df-actions { display:flex; gap:2px; align-items:center; }
   @media(max-width:420px){ .df-2{grid-template-columns:1fr;} }
 `
 
@@ -150,16 +163,16 @@ export default function App() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    loadAll()
-      .then(setData)
-      .catch(() => setError('Erreur de connexion Supabase. Verifier les variables VITE_SUPABASE_*.'))
+    loadAll().then(setData).catch(() => setError('Erreur de connexion Supabase.'))
   }, [])
+
+  const currentKm = data ? computeCurrentKm(data) : 0
 
   const openForm = (type, existing = null) => {
     const defaults = {
-      maintenance: { date: todayStr(), km: String(data.vehicle.km || '') },
+      maintenance: { date: todayStr(), km: String(currentKm) },
       trip: { date: todayStr() },
-      fuel: { date: todayStr(), km: String(data.vehicle.km || ''), full: true },
+      fuel: { date: todayStr(), km: String(currentKm), full: true },
       expense: { date: todayStr() },
       vehicle: { ...data.vehicle },
     }
@@ -175,7 +188,7 @@ export default function App() {
     try {
       if (formType === 'vehicle') {
         await saveVehicle(form)
-        setData(p => ({ ...p, vehicle: { ...p.vehicle, ...form, km: parseInt(form.km) || 0 } }))
+        setData(p => ({ ...p, vehicle: { ...p.vehicle, ...form } }))
       } else {
         const keyMap = { maintenance: 'maintenance', trip: 'trips', fuel: 'fuel', expense: 'expenses' }
         const key = keyMap[formType]
@@ -196,9 +209,11 @@ export default function App() {
     }
   }
 
-  const del = async (key, id) => {
+  const del = async (key, id, e) => {
+    e.stopPropagation()
+    if (!window.confirm('Supprimer cette entrée ?')) return
     await deleteRow(key, id)
-    setData(p => ({ ...p, [key]: p[key].filter(e => e.id !== id) }))
+    setData(p => ({ ...p, [key]: p[key].filter(x => x.id !== id) }))
   }
 
   if (error) return <div className="df"><div className="df-err">{error}</div></div>
@@ -207,11 +222,17 @@ export default function App() {
   const avgConso = computeAvgConso(data.fuel)
   const chartData = fuelChartData(data.fuel)
   const byCategory = expenseByCat(data.expenses)
-  const yearTotal = data.expenses.filter(e => e.date?.startsWith(String(new Date().getFullYear()))).reduce((s, e) => s + parseFloat(e.amount || 0), 0)
+  const yearTotal = data.expenses
+    .filter(e => e.date?.startsWith(String(new Date().getFullYear())))
+    .reduce((s, e) => s + parseFloat(e.amount || 0), 0)
   const alerts = data.maintenance.filter(m => {
-    const km = parseFloat(data.vehicle.km) || 0
-    return (m.nextKm && parseFloat(m.nextKm) - km < 2000) || (m.nextDate && new Date(m.nextDate) < new Date(Date.now() + 30 * 86400000))
+    return (m.nextKm && parseFloat(m.nextKm) - currentKm < 2000) ||
+           (m.nextDate && new Date(m.nextDate) < new Date(Date.now() + 30 * 86400000))
   })
+  const kmLogged = data.trips.reduce((s, t) => s + parseFloat(t.km || 0), 0)
+  const totalCosts = data.expenses.reduce((s, e) => s + parseFloat(e.amount || 0), 0) +
+                     data.fuel.reduce((s, f) => s + parseFloat(f.totalPrice || 0), 0)
+  const costPerKm = kmLogged > 100 ? (totalCosts / kmLogged).toFixed(2) : null
 
   const FORM_TITLES = { vehicle: 'Vehicule', maintenance: 'Nouvel entretien', trip: 'Nouveau trajet', fuel: 'Nouveau plein', expense: 'Nouvelle depense' }
 
@@ -228,15 +249,18 @@ export default function App() {
                 <button onClick={() => openForm('vehicle')}>Modifier</button>
               </div>
             </div>
-            <div className="df-km" onClick={() => openForm('vehicle')}>
-              <div className="df-km-n">{parseInt(data.vehicle.km || 0).toLocaleString('fr-FR')}</div>
+            <div className="df-km">
+              <div className="df-km-n">{currentKm.toLocaleString('fr-FR')}</div>
               <div className="df-km-l">km au compteur</div>
             </div>
           </div>
           {!formType && (
             <div className="df-tabs">
               {[['dashboard','Bord'],['maintenance','Entretien'],['trips','Trajets'],['fuel','Carburant'],['expenses','Depenses']].map(([k, l]) => (
-                <button key={k} className={'df-tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>{l}</button>
+                <button key={k} className={'df-tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>
+                  {l}
+                  {k === 'maintenance' && alerts.length > 0 && <span className="df-badge" />}
+                </button>
               ))}
             </div>
           )}
@@ -262,13 +286,13 @@ export default function App() {
           </div>
         ) : (
           <div className="df-body">
-            {tab === 'dashboard' && <DashTab data={data} alerts={alerts} avgConso={avgConso} yearTotal={yearTotal} />}
-            {tab === 'maintenance' && <MaintTab rows={data.maintenance} vehicle={data.vehicle} onAdd={() => openForm('maintenance')} onEdit={e => openForm('maintenance', e)} onDel={id => del('maintenance', id)} />}
-            {tab === 'trips' && <TripsTab rows={data.trips} onAdd={() => openForm('trip')} onEdit={e => openForm('trip', e)} onDel={id => del('trips', id)} />}
-            {tab === 'fuel' && <FuelTab rows={data.fuel} avgConso={avgConso} chartData={chartData} onAdd={() => openForm('fuel')} onEdit={e => openForm('fuel', e)} onDel={id => del('fuel', id)} />}
-            {tab === 'expenses' && <ExpTab rows={data.expenses} byCategory={byCategory} yearTotal={yearTotal} onAdd={() => openForm('expense')} onEdit={e => openForm('expense', e)} onDel={id => del('expenses', id)} />}
+            {tab === 'dashboard' && <DashTab data={data} alerts={alerts} avgConso={avgConso} yearTotal={yearTotal} currentKm={currentKm} costPerKm={costPerKm} kmLogged={kmLogged} />}
+            {tab === 'maintenance' && <MaintTab rows={data.maintenance} currentKm={currentKm} onAdd={() => openForm('maintenance')} onEdit={e => openForm('maintenance', e)} onDel={(id, ev) => del('maintenance', id, ev)} />}
+            {tab === 'trips' && <TripsTab rows={data.trips} onAdd={() => openForm('trip')} onEdit={e => openForm('trip', e)} onDel={(id, ev) => del('trips', id, ev)} />}
+            {tab === 'fuel' && <FuelTab rows={data.fuel} avgConso={avgConso} chartData={chartData} onAdd={() => openForm('fuel')} onEdit={e => openForm('fuel', e)} onDel={(id, ev) => del('fuel', id, ev)} />}
+            {tab === 'expenses' && <ExpTab rows={data.expenses} byCategory={byCategory} yearTotal={yearTotal} onAdd={() => openForm('expense')} onEdit={e => openForm('expense', e)} onDel={(id, ev) => del('expenses', id, ev)} />}
             <div className="df-foot">
-              <span className="df-mu">Supabase PostgreSQL</span>
+              <span className="df-mu">Supabase PostgreSQL · Appuyer sur une carte pour modifier</span>
               <button className="df-btn" onClick={() => exportCSV(data)}>Export CSV</button>
             </div>
           </div>
@@ -280,27 +304,26 @@ export default function App() {
 
 // ── TABS ─────────────────────────────────────────────────────
 
-function DashTab({ data, alerts, avgConso, yearTotal }) {
+function DashTab({ data, alerts, avgConso, yearTotal, currentKm, costPerKm, kmLogged }) {
   const recent = [
     ...data.maintenance.map(e => ({ ...e, _t: 'Entretien', _d: e.type })),
     ...data.trips.map(e => ({ ...e, _t: 'Trajet', _d: (e.from || '-') + ' → ' + (e.to || '-') })),
     ...data.fuel.map(e => ({ ...e, _t: 'Carburant', _d: (e.liters || '?') + 'L · ' + (e.totalPrice || '?') + '€' })),
     ...data.expenses.map(e => ({ ...e, _t: 'Depense', _d: e.description || e.category || '-' })),
   ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 6)
-  const totalKm = data.trips.reduce((s, t) => s + parseFloat(t.km || 0), 0)
   const last = data.maintenance[0]
   return (
     <div>
       <div className="df-kpis">
-        <div className="df-kpi"><div className="df-kpi-l">Km journaux</div><div className="df-kpi-v">{fmt(totalKm)}<span className="df-kpi-u">km</span></div></div>
+        <div className="df-kpi"><div className="df-kpi-l">Km journaux</div><div className="df-kpi-v">{fmt(kmLogged)}<span className="df-kpi-u">km</span></div></div>
         <div className="df-kpi"><div className="df-kpi-l">Conso moy.</div><div className="df-kpi-v">{avgConso || '—'}<span className="df-kpi-u">{avgConso ? 'L/100' : ''}</span></div></div>
         <div className="df-kpi"><div className="df-kpi-l">Depenses {new Date().getFullYear()}</div><div className="df-kpi-v">{fmt(yearTotal)}<span className="df-kpi-u">€</span></div></div>
-        <div className="df-kpi"><div className="df-kpi-l">Dernier entretien</div><div className="df-kpi-v" style={{ fontSize: 14, paddingTop: 4 }}>{last ? last.type : '—'}</div></div>
+        <div className="df-kpi"><div className="df-kpi-l">Cout / km</div><div className="df-kpi-v">{costPerKm || '—'}<span className="df-kpi-u">{costPerKm ? '€' : ''}</span></div></div>
       </div>
       {alerts.length > 0 && (<>
-        <div className="df-sh"><div className="df-st">Alertes entretien</div></div>
-        {alerts.map(m => {
-          const kl = m.nextKm ? parseFloat(m.nextKm) - parseFloat(data.vehicle.km || 0) : null
+        <div className="df-sh"><div className="df-st" style={{ color: 'var(--amber)' }}>⚠ Alertes entretien</div></div>
+        {sortByDate(alerts).map(m => {
+          const kl = m.nextKm ? parseFloat(m.nextKm) - currentKm : null
           return (
             <div key={m.id} className="df-alert">
               <div><div className="df-at">{m.type}</div><div className="df-as">{m.nextKm && 'A ' + parseInt(m.nextKm).toLocaleString('fr-FR') + ' km'}{m.nextKm && m.nextDate && ' · '}{m.nextDate}</div></div>
@@ -323,30 +346,20 @@ function DashTab({ data, alerts, avgConso, yearTotal }) {
   )
 }
 
-function CardActions({ onEdit, onDel }) {
-  return (
-    <div className="df-actions">
-      <button className="df-edit" onClick={onEdit} aria-label="Modifier">✏️</button>
-      <button className="df-del" onClick={onDel} aria-label="Supprimer">×</button>
-    </div>
-  )
-}
-
-function MaintTab({ rows, vehicle, onAdd, onEdit, onDel }) {
-  const km = parseFloat(vehicle.km || 0)
+function MaintTab({ rows, currentKm, onAdd, onEdit, onDel }) {
   return (
     <div>
       <div className="df-sh"><div className="df-st">Entretiens ({rows.length})</div><button className="df-btn p" onClick={onAdd}>+ Ajouter</button></div>
-      {rows.length === 0 ? <div className="df-empty">Aucun entretien enregistre</div> : rows.map(m => {
-        const kl = m.nextKm ? parseFloat(m.nextKm) - km : null
+      {rows.length === 0 ? <div className="df-empty">Aucun entretien enregistre</div> : sortByDate(rows).map(m => {
+        const kl = m.nextKm ? parseFloat(m.nextKm) - currentKm : null
         return (
-          <div key={m.id} className="df-card">
+          <div key={m.id} className="df-card" onClick={() => onEdit(m)}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16 }}>{m.type}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{m.date}{m.km ? ' · ' + parseInt(m.km).toLocaleString('fr-FR') + ' km' : ''}{m.garage ? ' · ' + m.garage : ''}</div>
               </div>
-              <CardActions onEdit={() => onEdit(m)} onDel={() => onDel(m.id)} />
+              <button className="df-del" onClick={e => onDel(m.id, e)}>×</button>
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {m.cost && <span className="df-b df-bg">{fmt(m.cost, 2)} €</span>}
@@ -376,14 +389,14 @@ function TripsTab({ rows, onAdd, onEdit, onDel }) {
         <div className="df-stat"><div className="df-sv">{fmt(kmY)}</div><div className="df-sl">{yr}</div></div>
         <div className="df-stat"><div className="df-sv">{fmt(kmT)}</div><div className="df-sl">Total</div></div>
       </div>
-      {rows.length === 0 ? <div className="df-empty">Aucun trajet enregistre</div> : rows.map(t => (
-        <div key={t.id} className="df-card">
+      {rows.length === 0 ? <div className="df-empty">Aucun trajet enregistre</div> : sortByDate(rows).map(t => (
+        <div key={t.id} className="df-card" onClick={() => onEdit(t)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15 }}>{t.from || '—'} → {t.to || '—'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{t.date}{t.purpose ? ' · ' + t.purpose : ''}</div>
             </div>
-            <CardActions onEdit={() => onEdit(t)} onDel={() => onDel(t.id)} />
+            <button className="df-del" onClick={e => onDel(t.id, e)}>×</button>
           </div>
           <div style={{ marginTop: 6 }}><span className="df-b df-bg">{fmt(t.km)} km</span></div>
         </div>
@@ -395,6 +408,7 @@ function TripsTab({ rows, onAdd, onEdit, onDel }) {
 function FuelTab({ rows, avgConso, chartData, onAdd, onEdit, onDel }) {
   const totalL = rows.reduce((s, f) => s + parseFloat(f.liters || 0), 0)
   const totalC = rows.reduce((s, f) => s + parseFloat(f.totalPrice || 0), 0)
+  const lastFill = sortByDate(rows)[0]
   return (
     <div>
       <div className="df-sh"><div className="df-st">Carburant ({rows.length})</div><button className="df-btn p" onClick={onAdd}>+ Ajouter</button></div>
@@ -404,7 +418,7 @@ function FuelTab({ rows, avgConso, chartData, onAdd, onEdit, onDel }) {
         <div className="df-stat"><div className="df-sv">{fmt(totalC)} €</div><div className="df-sl">Cout</div></div>
       </div>
       {chartData.length > 1 && (
-        <div className="df-card">
+        <div className="df-card" style={{ cursor: 'default' }} onClick={e => e.stopPropagation()}>
           <div className="df-card-title">Consommation L/100km</div>
           <ResponsiveContainer width="100%" height={100}>
             <LineChart data={chartData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
@@ -416,8 +430,8 @@ function FuelTab({ rows, avgConso, chartData, onAdd, onEdit, onDel }) {
           </ResponsiveContainer>
         </div>
       )}
-      {rows.length === 0 ? <div className="df-empty">Aucun plein enregistre</div> : rows.map(f => (
-        <div key={f.id} className="df-card">
+      {rows.length === 0 ? <div className="df-empty">Aucun plein enregistre</div> : sortByDate(rows).map(f => (
+        <div key={f.id} className="df-card" onClick={() => onEdit(f)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15 }}>
@@ -427,7 +441,7 @@ function FuelTab({ rows, avgConso, chartData, onAdd, onEdit, onDel }) {
                 {f.date}{f.km ? ' · ' + parseInt(f.km).toLocaleString('fr-FR') + ' km' : ''}{f.station ? ' · ' + f.station : ''}
               </div>
             </div>
-            <CardActions onEdit={() => onEdit(f)} onDel={() => onDel(f.id)} />
+            <button className="df-del" onClick={e => onDel(f.id, e)}>×</button>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             {f.pricePerLiter && <span className="df-b df-bn">{parseFloat(f.pricePerLiter).toFixed(3)} €/L</span>}
@@ -450,7 +464,7 @@ function ExpTab({ rows, byCategory, yearTotal, onAdd, onEdit, onDel }) {
         <div className="df-stat"><div className="df-sv">{byCategory.length}</div><div className="df-sl">Categories</div></div>
       </div>
       {byCategory.length > 1 && (
-        <div className="df-card">
+        <div className="df-card" style={{ cursor: 'default' }} onClick={e => e.stopPropagation()}>
           <div className="df-card-title">Par categorie (€)</div>
           <ResponsiveContainer width="100%" height={100}>
             <BarChart data={byCategory} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
@@ -462,14 +476,14 @@ function ExpTab({ rows, byCategory, yearTotal, onAdd, onEdit, onDel }) {
           </ResponsiveContainer>
         </div>
       )}
-      {rows.length === 0 ? <div className="df-empty">Aucune depense enregistree</div> : rows.map(e => (
-        <div key={e.id} className="df-card">
+      {rows.length === 0 ? <div className="df-empty">Aucune depense enregistree</div> : sortByDate(rows).map(e => (
+        <div key={e.id} className="df-card" onClick={() => onEdit(e)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15 }}>{e.description || e.category || '—'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{e.date}</div>
             </div>
-            <CardActions onEdit={() => onEdit(e)} onDel={() => onDel(e.id)} />
+            <button className="df-del" onClick={ev => onDel(e.id, ev)}>×</button>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <span className="df-b df-bg">{parseFloat(e.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
@@ -495,11 +509,11 @@ function MaintForm({ form, set }) {
       <F label="Type"><Sel value={form.type || ''} onChange={u('type')}><option value=''>Selectionner...</option>{MAINT_TYPES.map(t => <option key={t}>{t}</option>)}</Sel></F>
     </div>
     <div className="df-2">
-      <F label="Km compteur"><I type="number" placeholder="45000" value={form.km || ''} onChange={u('km')} /></F>
-      <F label="Cout (€)"><I type="number" step="0.01" placeholder="180.00" value={form.cost || ''} onChange={u('cost')} /></F>
+      <F label="Km compteur"><I type="number" inputMode="numeric" placeholder="45000" value={form.km || ''} onChange={u('km')} /></F>
+      <F label="Cout (€)"><I type="number" inputMode="decimal" step="0.01" placeholder="180.00" value={form.cost || ''} onChange={u('cost')} /></F>
     </div>
     <div className="df-2">
-      <F label="Prochain km"><I type="number" placeholder="60000" value={form.nextKm || ''} onChange={u('nextKm')} /></F>
+      <F label="Prochain km"><I type="number" inputMode="numeric" placeholder="60000" value={form.nextKm || ''} onChange={u('nextKm')} /></F>
       <F label="Prochaine date"><I type="date" value={form.nextDate || ''} onChange={u('nextDate')} /></F>
     </div>
     <F label="Garage"><I type="text" placeholder="Nom du garage..." value={form.garage || ''} onChange={u('garage')} /></F>
@@ -516,8 +530,8 @@ function TripForm({ form, set }) {
       <F label="Arrivee"><I type="text" placeholder="Destination" value={form.to || ''} onChange={u('to')} /></F>
     </div>
     <div className="df-2">
-      <F label="Distance (km)"><I type="number" placeholder="300" value={form.km || ''} onChange={u('km')} /></F>
-      <F label="Km compteur fin"><I type="number" placeholder="45300" value={form.endKm || ''} onChange={u('endKm')} /></F>
+      <F label="Distance (km)"><I type="number" inputMode="numeric" placeholder="300" value={form.km || ''} onChange={u('km')} /></F>
+      <F label="Km compteur fin"><I type="number" inputMode="numeric" placeholder="45300" value={form.endKm || ''} onChange={u('endKm')} /></F>
     </div>
     <F label="Objet"><I type="text" placeholder="Weekend, pro, vacances..." value={form.purpose || ''} onChange={u('purpose')} /></F>
   </>)
@@ -536,14 +550,14 @@ function FuelForm({ form, set }) {
   return (<>
     <div className="df-2">
       <F label="Date"><I type="date" value={form.date || ''} onChange={e => u('date')(e.target.value)} /></F>
-      <F label="Km compteur"><I type="number" placeholder="45000" value={form.km || ''} onChange={e => u('km')(e.target.value)} /></F>
+      <F label="Km compteur"><I type="number" inputMode="numeric" placeholder="45000" value={form.km || ''} onChange={e => u('km')(e.target.value)} /></F>
     </div>
     <div className="df-2">
-      <F label="Litres"><I type="number" step="0.01" placeholder="65.00" value={form.liters || ''} onChange={onL} /></F>
-      <F label="Prix/litre (€)"><I type="number" step="0.001" placeholder="1.859" value={form.pricePerLiter || ''} onChange={onP} /></F>
+      <F label="Litres"><I type="number" inputMode="decimal" step="0.01" placeholder="65.00" value={form.liters || ''} onChange={onL} /></F>
+      <F label="Prix/litre (€)"><I type="number" inputMode="decimal" step="0.001" placeholder="1.859" value={form.pricePerLiter || ''} onChange={onP} /></F>
     </div>
     <div className="df-2">
-      <F label="Total (€) — auto"><I type="number" step="0.01" value={form.totalPrice || ''} onChange={e => u('totalPrice')(e.target.value)} /></F>
+      <F label="Total (€) — auto"><I type="number" inputMode="decimal" step="0.01" value={form.totalPrice || ''} onChange={e => u('totalPrice')(e.target.value)} /></F>
       <F label="Plein complet ?">
         <Sel value={form.full === false || form.full === 'false' ? 'false' : 'true'} onChange={e => u('full')(e.target.value !== 'false')}>
           <option value="true">Oui — plein complet</option>
@@ -563,7 +577,7 @@ function ExpForm({ form, set }) {
       <F label="Categorie"><Sel value={form.category || ''} onChange={u('category')}><option value=''>Selectionner...</option>{EXP_CATS.map(c => <option key={c}>{c}</option>)}</Sel></F>
     </div>
     <F label="Description"><I type="text" placeholder="Detail de la depense..." value={form.description || ''} onChange={u('description')} /></F>
-    <F label="Montant (€)"><I type="number" step="0.01" placeholder="0.00" value={form.amount || ''} onChange={u('amount')} /></F>
+    <F label="Montant (€)"><I type="number" inputMode="decimal" step="0.01" placeholder="0.00" value={form.amount || ''} onChange={u('amount')} /></F>
   </>)
 }
 
@@ -575,9 +589,11 @@ function VehForm({ form, set }) {
       <F label="Modele"><I type="text" placeholder="90 / 110 / 130" value={form.model || ''} onChange={u('model')} /></F>
     </div>
     <div className="df-2">
-      <F label="Annee"><I type="number" placeholder="2020" value={form.year || ''} onChange={u('year')} /></F>
+      <F label="Annee"><I type="number" inputMode="numeric" placeholder="1996" value={form.year || ''} onChange={u('year')} /></F>
       <F label="Immatriculation"><I type="text" placeholder="AB-123-CD" value={form.plate || ''} onChange={u('plate')} /></F>
     </div>
-    <F label="Km actuel au compteur"><I type="number" placeholder="45000" value={form.km || ''} onChange={u('km')} /></F>
+    <div style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '10px 12px', fontSize: 11, color: 'var(--text-3)' }}>
+      Le kilométrage est calculé automatiquement depuis tes relevés (carburant, entretien, trajets).
+    </div>
   </>)
 }
