@@ -65,7 +65,7 @@ const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&display=swap');
   .df * { box-sizing: border-box; }
   .df { background: var(--bg); min-height: 100vh; min-height: 100dvh; color: var(--text); }
-  .df-hdr { border-bott.df-hdr { border-bottom: 1px solid var(--border); padding: max(14px, env(safe-area-inset-top)) 16px 0; background: var(--surface); position: sticky; top: 0; z-index: 10; }om: 1px solid var(--border); padding: 14px 16px 0; background: var(--surface); position: sticky; top: 0; z-index: 10; }
+.df-hdr { border-bottom: 1px solid var(--border); padding-top: calc(14px + env(safe-area-inset-top)); padding-left: 16px; padding-right: 16px; background: var(--surface); position: sticky; top: 0; z-index: 10; }
   .df-hdr-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
   .df-vname { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:22px; letter-spacing:2px; text-transform:uppercase; line-height:1; }
   .df-vsub { font-size:11px; color:var(--text-3); letter-spacing:1px; margin-top:3px; }
