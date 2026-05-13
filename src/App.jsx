@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
 import { loadAll, saveVehicle, addRow, updateRow, deleteRow } from './db.js'
 
-// ── Helpers ──────────────────────────────────────────────────
-
 function fmt(n, dec = 0) {
   if (n == null || isNaN(parseFloat(n))) return '—'
   return parseFloat(n).toLocaleString('fr-FR', { minimumFractionDigits: dec, maximumFractionDigits: dec })
@@ -65,7 +63,17 @@ const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&display=swap');
   .df * { box-sizing: border-box; }
   .df { background: var(--bg); min-height: 100vh; min-height: 100dvh; color: var(--text); }
-  .df-hdr { border-bottom: 1px solid var(--border); padding: 14px 16px 0; background: var(--surface); position: sticky; top: 0; z-index: 10; }
+  .df-hdr {
+    border-bottom: 1px solid var(--border);
+    padding-top: calc(14px + env(safe-area-inset-top));
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: 0;
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
   .df-hdr-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
   .df-vname { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:22px; letter-spacing:2px; text-transform:uppercase; line-height:1; }
   .df-vsub { font-size:11px; color:var(--text-3); letter-spacing:1px; margin-top:3px; }
@@ -90,8 +98,7 @@ const CSS = `
   .df-btn.p { background:var(--success-bg); border-color:var(--accent-dim); color:var(--accent); }
   .df-del { background:none; border:none; color:var(--text-3); cursor:pointer; font-size:16px; padding:4px 8px; border-radius:4px; line-height:1; }
   .df-del:hover { color:var(--danger); background:var(--danger-bg); }
-  .df-edit { background:none; border:none; color:var(--text-3); cursor:pointer; font-size:14px; padding:4px 8px; border-radius:4px; line-height:1; }
-  .df-edit:hover { color:var(--accent); background:var(--success-bg); }
+  .df-edit { background:none; border:none; cursor:pointer; font-size:15px; padding:4px 8px; border-radius:4px; line-height:1; }
   .df-b { display:inline-block; padding:2px 7px; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:1px; text-transform:uppercase; border-radius:var(--radius); }
   .df-bg { background:var(--success-bg); color:var(--accent); }
   .df-ba { background:var(--warning-bg); color:var(--amber); }
@@ -107,7 +114,14 @@ const CSS = `
   .df-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:12px 14px; margin-bottom:8px; }
   .df-card-title { font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--text-3); margin-bottom:8px; }
   .df-empty { border:1px dashed var(--border); border-radius:var(--radius); padding:28px; text-align:center; color:var(--text-3); font-size:12px; }
-  .df-form-hdr { display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:10; }
+  .df-form-hdr {
+    display:flex; align-items:center; gap:12px;
+    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-left: 16px; padding-right: 16px; padding-bottom: 12px;
+    border-bottom:1px solid var(--border);
+    background:var(--surface);
+    position:sticky; top:0; z-index:10;
+  }
   .df-form-back { background:none; border:none; color:var(--text-2); cursor:pointer; font-size:22px; padding:2px 6px; border-radius:4px; line-height:1; }
   .df-form-title { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:17px; letter-spacing:2px; text-transform:uppercase; }
   .df-form-body { padding:16px; }
@@ -122,6 +136,7 @@ const CSS = `
   .df-mu { color:var(--text-3); font-size:10px; }
   .df-loader { display:flex; align-items:center; justify-content:center; min-height:200px; color:var(--text-3); font-family:'Barlow Condensed',sans-serif; letter-spacing:2px; text-transform:uppercase; font-size:13px; }
   .df-err { padding:20px; background:var(--danger-bg); border:1px solid var(--danger); border-radius:var(--radius); color:var(--danger); font-size:12px; margin:16px; }
+  .df-actions { display:flex; gap:2px; align-items:center; }
   @media(max-width:420px){ .df-2{grid-template-columns:1fr;} }
 `
 
@@ -137,7 +152,7 @@ export default function App() {
   useEffect(() => {
     loadAll()
       .then(setData)
-      .catch(e => setError('Erreur de connexion Supabase. Vérifier les variables VITE_SUPABASE_*.'))
+      .catch(() => setError('Erreur de connexion Supabase. Verifier les variables VITE_SUPABASE_*.'))
   }, [])
 
   const openForm = (type, existing = null) => {
@@ -150,7 +165,7 @@ export default function App() {
     }
     setFormType(type)
     setEditingId(existing ? existing.id : null)
-    setForm(existing || defaults[type] || { date: todayStr() })
+    setForm(existing ? { ...existing } : (defaults[type] || { date: todayStr() }))
   }
 
   const closeForm = () => { setFormType(null); setForm({}); setEditingId(null) }
@@ -204,7 +219,6 @@ export default function App() {
     <>
       <style>{CSS}</style>
       <div className="df">
-
         <div className="df-hdr">
           <div className="df-hdr-top">
             <div>
@@ -264,7 +278,7 @@ export default function App() {
   )
 }
 
-// ── TAB COMPONENTS ───────────────────────────────────────────
+// ── TABS ─────────────────────────────────────────────────────
 
 function DashTab({ data, alerts, avgConso, yearTotal }) {
   const recent = [
@@ -309,6 +323,15 @@ function DashTab({ data, alerts, avgConso, yearTotal }) {
   )
 }
 
+function CardActions({ onEdit, onDel }) {
+  return (
+    <div className="df-actions">
+      <button className="df-edit" onClick={onEdit} aria-label="Modifier">✏️</button>
+      <button className="df-del" onClick={onDel} aria-label="Supprimer">×</button>
+    </div>
+  )
+}
+
 function MaintTab({ rows, vehicle, onAdd, onEdit, onDel }) {
   const km = parseFloat(vehicle.km || 0)
   return (
@@ -323,10 +346,7 @@ function MaintTab({ rows, vehicle, onAdd, onEdit, onDel }) {
                 <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16 }}>{m.type}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{m.date}{m.km ? ' · ' + parseInt(m.km).toLocaleString('fr-FR') + ' km' : ''}{m.garage ? ' · ' + m.garage : ''}</div>
               </div>
-              <div style={{ display: 'flex', gap: 2 }}>
-                <button className="df-edit" onClick={() => onEdit(m)}>✏️</button>
-                <button className="df-del" onClick={() => onDel(m.id)}>×</button>
-              </div>
+              <CardActions onEdit={() => onEdit(m)} onDel={() => onDel(m.id)} />
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {m.cost && <span className="df-b df-bg">{fmt(m.cost, 2)} €</span>}
@@ -363,10 +383,7 @@ function TripsTab({ rows, onAdd, onEdit, onDel }) {
               <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15 }}>{t.from || '—'} → {t.to || '—'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{t.date}{t.purpose ? ' · ' + t.purpose : ''}</div>
             </div>
-            <div style={{ display: 'flex', gap: 2 }}>
-              <button className="df-edit" onClick={() => onEdit(t)}>✏️</button>
-              <button className="df-del" onClick={() => onDel(t.id)}>×</button>
-            </div>
+            <CardActions onEdit={() => onEdit(t)} onDel={() => onDel(t.id)} />
           </div>
           <div style={{ marginTop: 6 }}><span className="df-b df-bg">{fmt(t.km)} km</span></div>
         </div>
@@ -410,10 +427,7 @@ function FuelTab({ rows, avgConso, chartData, onAdd, onEdit, onDel }) {
                 {f.date}{f.km ? ' · ' + parseInt(f.km).toLocaleString('fr-FR') + ' km' : ''}{f.station ? ' · ' + f.station : ''}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 2 }}>
-              <button className="df-edit" onClick={() => onEdit(f)}>✏️</button>
-              <button className="df-del" onClick={() => onDel(f.id)}>×</button>
-            </div>
+            <CardActions onEdit={() => onEdit(f)} onDel={() => onDel(f.id)} />
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             {f.pricePerLiter && <span className="df-b df-bn">{parseFloat(f.pricePerLiter).toFixed(3)} €/L</span>}
@@ -455,10 +469,7 @@ function ExpTab({ rows, byCategory, yearTotal, onAdd, onEdit, onDel }) {
               <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15 }}>{e.description || e.category || '—'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{e.date}</div>
             </div>
-            <div style={{ display: 'flex', gap: 2 }}>
-              <button className="df-edit" onClick={() => onEdit(e)}>✏️</button>
-              <button className="df-del" onClick={() => onDel(e.id)}>×</button>
-            </div>
+            <CardActions onEdit={() => onEdit(e)} onDel={() => onDel(e.id)} />
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <span className="df-b df-bg">{parseFloat(e.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
