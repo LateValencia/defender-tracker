@@ -134,6 +134,18 @@ export async function addRow(table, data) {
   if (error) console.error(`addRow(${table}):`, error)
 }
 
+export async function updateRow(table, id, data) {
+  const converters = {
+    maintenance: maintToDB,
+    trips: tripToDB,
+    fuel: fuelToDB,
+    expenses: expenseToDB,
+  }
+  const dbData = converters[table](data)
+  const { error } = await supabase.from(table).update(dbData).eq('id', id)
+  if (error) console.error(`updateRow(${table}):`, error)
+}
+
 export async function deleteRow(table, id) {
   const { error } = await supabase.from(table).delete().eq('id', id)
   if (error) console.error(`deleteRow(${table}):`, error)

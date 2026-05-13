@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
-import { loadAll, saveVehicle, addRow, deleteRow } from './db.js'
+import { loadAll, saveVehicle, addRow, updateRow, deleteRow } from './db.js'
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&display=swap');
   .df * { box-sizing: border-box; }
   .df { background: var(--bg); min-height: 100vh; min-height: 100dvh; color: var(--text); }
-.df-hdr { border-bottom: 1px solid var(--border); padding-top: calc(14px + env(safe-area-inset-top)); padding-left: 16px; padding-right: 16px; background: var(--surface); position: sticky; top: 0; z-index: 10; }
+  .df-hdr { border-bottom: 1px solid var(--border); padding: 14px 16px 0; background: var(--surface); position: sticky; top: 0; z-index: 10; }
   .df-hdr-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
   .df-vname { font-family:'Barlow Condensed',sans-serif; font-weight:800; font-size:22px; letter-spacing:2px; text-transform:uppercase; line-height:1; }
   .df-vsub { font-size:11px; color:var(--text-3); letter-spacing:1px; margin-top:3px; }
@@ -90,6 +90,8 @@ const CSS = `
   .df-btn.p { background:var(--success-bg); border-color:var(--accent-dim); color:var(--accent); }
   .df-del { background:none; border:none; color:var(--text-3); cursor:pointer; font-size:16px; padding:4px 8px; border-radius:4px; line-height:1; }
   .df-del:hover { color:var(--danger); background:var(--danger-bg); }
+  .df-edit { background:none; border:none; color:var(--text-3); cursor:pointer; font-size:14px; padding:4px 8px; border-radius:4px; line-height:1; }
+  .df-edit:hover { color:var(--accent); background:var(--success-bg); }
   .df-b { display:inline-block; padding:2px 7px; font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:10px; letter-spacing:1px; text-transform:uppercase; border-radius:var(--radius); }
   .df-bg { background:var(--success-bg); color:var(--accent); }
   .df-ba { background:var(--warning-bg); color:var(--amber); }
@@ -128,6 +130,7 @@ export default function App() {
   const [tab, setTab] = useState('dashboard')
   const [formType, setFormType] = useState(null)
   const [form, setForm] = useState({})
+  const [editingId, setEditingId] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
 
@@ -137,7 +140,7 @@ export default function App() {
       .catch(e => setError('Erreur de connexion Supabase. Vérifier les variables VITE_SUPABASE_*.'))
   }, [])
 
-  const openForm = type => {
+  const openForm = (type, existing = null) => {
     const defaults = {
       maintenance: { date: todayStr(), km: String(data.vehicle.km || '') },
       trip: { date: todayStr() },
@@ -146,10 +149,11 @@ export default function App() {
       vehicle: { ...data.vehicle },
     }
     setFormType(type)
-    setForm(defaults[type] || { date: todayStr() })
+    setEditingId(existing ? existing.id : null)
+    setForm(existing || defaults[type] || { date: todayStr() })
   }
 
-  const closeForm = () => { setFormType(null); setForm({}) }
+  const closeForm = () => { setFormType(null); setForm({}); setEditingId(null) }
 
   const handleSave = async () => {
     setSaving(true)
@@ -159,11 +163,15 @@ export default function App() {
         setData(p => ({ ...p, vehicle: { ...p.vehicle, ...form, km: parseInt(form.km) || 0 } }))
       } else {
         const keyMap = { maintenance: 'maintenance', trip: 'trips', fuel: 'fuel', expense: 'expenses' }
-        const tableMap = { maintenance: 'maintenance', trip: 'trips', fuel: 'fuel', expense: 'expenses' }
-        const appKey = keyMap[formType]
-        const entry = { id: Date.now().toString(), ...form }
-        await addRow(tableMap[formType], entry)
-        setData(p => ({ ...p, [appKey]: [entry, ...p[appKey]] }))
+        const key = keyMap[formType]
+        if (editingId) {
+          await updateRow(key, editingId, { ...form, id: editingId })
+          setData(p => ({ ...p, [key]: p[key].map(e => e.id === editingId ? { ...form, id: editingId } : e) }))
+        } else {
+          const entry = { id: Date.now().toString(), ...form }
+          await addRow(key, entry)
+          setData(p => ({ ...p, [key]: [entry, ...p[key]] }))
+        }
       }
       closeForm()
     } catch (e) {
@@ -224,7 +232,7 @@ export default function App() {
           <div>
             <div className="df-form-hdr">
               <button className="df-form-back" onClick={closeForm}>←</button>
-              <div className="df-form-title">{FORM_TITLES[formType]}</div>
+              <div className="df-form-title">{editingId ? 'Modifier' : FORM_TITLES[formType]}</div>
             </div>
             <div className="df-form-body">
               {formType === 'maintenance' && <MaintForm form={form} set={setForm} />}
@@ -241,10 +249,10 @@ export default function App() {
         ) : (
           <div className="df-body">
             {tab === 'dashboard' && <DashTab data={data} alerts={alerts} avgConso={avgConso} yearTotal={yearTotal} />}
-            {tab === 'maintenance' && <MaintTab rows={data.maintenance} vehicle={data.vehicle} onAdd={() => openForm('maintenance')} onDel={id => del('maintenance', id)} />}
-            {tab === 'trips' && <TripsTab rows={data.trips} onAdd={() => openForm('trip')} onDel={id => del('trips', id)} />}
-            {tab === 'fuel' && <FuelTab rows={data.fuel} avgConso={avgConso} chartData={chartData} onAdd={() => openForm('fuel')} onDel={id => del('fuel', id)} />}
-            {tab === 'expenses' && <ExpTab rows={data.expenses} byCategory={byCategory} yearTotal={yearTotal} onAdd={() => openForm('expense')} onDel={id => del('expenses', id)} />}
+            {tab === 'maintenance' && <MaintTab rows={data.maintenance} vehicle={data.vehicle} onAdd={() => openForm('maintenance')} onEdit={e => openForm('maintenance', e)} onDel={id => del('maintenance', id)} />}
+            {tab === 'trips' && <TripsTab rows={data.trips} onAdd={() => openForm('trip')} onEdit={e => openForm('trip', e)} onDel={id => del('trips', id)} />}
+            {tab === 'fuel' && <FuelTab rows={data.fuel} avgConso={avgConso} chartData={chartData} onAdd={() => openForm('fuel')} onEdit={e => openForm('fuel', e)} onDel={id => del('fuel', id)} />}
+            {tab === 'expenses' && <ExpTab rows={data.expenses} byCategory={byCategory} yearTotal={yearTotal} onAdd={() => openForm('expense')} onEdit={e => openForm('expense', e)} onDel={id => del('expenses', id)} />}
             <div className="df-foot">
               <span className="df-mu">Supabase PostgreSQL</span>
               <button className="df-btn" onClick={() => exportCSV(data)}>Export CSV</button>
@@ -301,7 +309,7 @@ function DashTab({ data, alerts, avgConso, yearTotal }) {
   )
 }
 
-function MaintTab({ rows, vehicle, onAdd, onDel }) {
+function MaintTab({ rows, vehicle, onAdd, onEdit, onDel }) {
   const km = parseFloat(vehicle.km || 0)
   return (
     <div>
@@ -315,7 +323,10 @@ function MaintTab({ rows, vehicle, onAdd, onDel }) {
                 <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 16 }}>{m.type}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{m.date}{m.km ? ' · ' + parseInt(m.km).toLocaleString('fr-FR') + ' km' : ''}{m.garage ? ' · ' + m.garage : ''}</div>
               </div>
-              <button className="df-del" onClick={() => onDel(m.id)}>×</button>
+              <div style={{ display: 'flex', gap: 2 }}>
+                <button className="df-edit" onClick={() => onEdit(m)}>✏️</button>
+                <button className="df-del" onClick={() => onDel(m.id)}>×</button>
+              </div>
             </div>
             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
               {m.cost && <span className="df-b df-bg">{fmt(m.cost, 2)} €</span>}
@@ -330,7 +341,7 @@ function MaintTab({ rows, vehicle, onAdd, onDel }) {
   )
 }
 
-function TripsTab({ rows, onAdd, onDel }) {
+function TripsTab({ rows, onAdd, onEdit, onDel }) {
   const now = new Date()
   const ym = now.toISOString().slice(0, 7)
   const yr = String(now.getFullYear())
@@ -352,7 +363,10 @@ function TripsTab({ rows, onAdd, onDel }) {
               <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15 }}>{t.from || '—'} → {t.to || '—'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{t.date}{t.purpose ? ' · ' + t.purpose : ''}</div>
             </div>
-            <button className="df-del" onClick={() => onDel(t.id)}>×</button>
+            <div style={{ display: 'flex', gap: 2 }}>
+              <button className="df-edit" onClick={() => onEdit(t)}>✏️</button>
+              <button className="df-del" onClick={() => onDel(t.id)}>×</button>
+            </div>
           </div>
           <div style={{ marginTop: 6 }}><span className="df-b df-bg">{fmt(t.km)} km</span></div>
         </div>
@@ -361,7 +375,7 @@ function TripsTab({ rows, onAdd, onDel }) {
   )
 }
 
-function FuelTab({ rows, avgConso, chartData, onAdd, onDel }) {
+function FuelTab({ rows, avgConso, chartData, onAdd, onEdit, onDel }) {
   const totalL = rows.reduce((s, f) => s + parseFloat(f.liters || 0), 0)
   const totalC = rows.reduce((s, f) => s + parseFloat(f.totalPrice || 0), 0)
   return (
@@ -396,7 +410,10 @@ function FuelTab({ rows, avgConso, chartData, onAdd, onDel }) {
                 {f.date}{f.km ? ' · ' + parseInt(f.km).toLocaleString('fr-FR') + ' km' : ''}{f.station ? ' · ' + f.station : ''}
               </div>
             </div>
-            <button className="df-del" onClick={() => onDel(f.id)}>×</button>
+            <div style={{ display: 'flex', gap: 2 }}>
+              <button className="df-edit" onClick={() => onEdit(f)}>✏️</button>
+              <button className="df-del" onClick={() => onDel(f.id)}>×</button>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             {f.pricePerLiter && <span className="df-b df-bn">{parseFloat(f.pricePerLiter).toFixed(3)} €/L</span>}
@@ -408,7 +425,7 @@ function FuelTab({ rows, avgConso, chartData, onAdd, onDel }) {
   )
 }
 
-function ExpTab({ rows, byCategory, yearTotal, onAdd, onDel }) {
+function ExpTab({ rows, byCategory, yearTotal, onAdd, onEdit, onDel }) {
   const total = rows.reduce((s, e) => s + parseFloat(e.amount || 0), 0)
   return (
     <div>
@@ -438,7 +455,10 @@ function ExpTab({ rows, byCategory, yearTotal, onAdd, onDel }) {
               <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 15 }}>{e.description || e.category || '—'}</div>
               <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>{e.date}</div>
             </div>
-            <button className="df-del" onClick={() => onDel(e.id)}>×</button>
+            <div style={{ display: 'flex', gap: 2 }}>
+              <button className="df-edit" onClick={() => onEdit(e)}>✏️</button>
+              <button className="df-del" onClick={() => onDel(e.id)}>×</button>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
             <span className="df-b df-bg">{parseFloat(e.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
